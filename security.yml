@@ -1,0 +1,49 @@
+---
+- hosts: all
+  gather_facts: True
+  vars:
+     min_required_boot_space: 50
+  tasks:
+      - name: "[ Boot Disk Task ] - Free up space on /boot filesystem by removing older un-needed kernels"
+        shell: "{% if ansible_distribution_major_version|int == 7 %}{{ rhel7syntax }}{% elif ansible_distribution_major_version|int == 8 %}{{ rhel8syntax }}{% endif %}"
+        failed_when: false
+        vars:
+          rhel7syntax: '/usr/bin/package-cleanup --oldkernels --count=1 -y'
+          rhel8syntax: '/usr/bin/yum remove --oldinstallonly -y'
+        args:
+          warn: no
+
+      - name: "[ Boot Disk Task ] - Grab facts again after cleaning up /boot"
+        setup:
+          gather_subset: hardware
+
+      - name: "[ Boot Disk Task ] - Set facts AGAIN because we just regathered facts in the previous step"
+        set_fact:
+          __bootvol_size: "{{ ((ansible_facts['mounts']|selectattr('mount','equalto','/boot')|map(attribute='size_available')|list)[0]|filesizeformat(True)).split()[0] }}"
+          __bootvol_units: "{{ ((ansible_facts['mounts']|selectattr('mount','equalto','/boot')|map(attribute='size_available')|list)[0]|filesizeformat(True)).split()[1] }}"
+
+      - name: "[ Boot Disk Task ] - Assert /boot has enough space"
+        assert:
+          that:
+            - ansible_facts is defined
+            - ("'mi' in __bootvol_units|lower" and min_required_boot_space|int > __bootvol_size|float ) or ("'gi' in __bootvol_units|lower" and __bootvol_size|int >= 1)
+          fail_msg: "/boot filesystem does not have enough free space.  Manually fix and rerun"
+          success_msg: "/boot space ok to continue"
+
+      - name: "Security updates using the YUM module"
+        yum:
+          name: "*"
+          security: yes
+          bugfix: yes
+          state: latest
+          update_cache: yes
+          update_only: yes
+        register: yum_update_status
+
+      - name: "Remove packages not needed anymore"
+        yum:
+          autoremove: yes
+
+      - name: "Reboot when packages are updated"
+        reboot:
+        when: yum_update_status.changed
