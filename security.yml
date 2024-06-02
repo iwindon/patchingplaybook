@@ -46,4 +46,9 @@
 
       - name: "Reboot when packages are updated"
         reboot:
+          msg: "Rebooting due to package updates"
+          connect_timeout: 5
+          reboot_timeout: 600
+          pre_reboot_delay: 0
+          post_reboot_delay: 30
         when: yum_update_status.changed
